@@ -1,0 +1,406 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace TaskManagerApp
+{
+    public class TaskItem
+    {
+        public string Title { get; set; }
+        public string Description { get; set; }
+        public string Priority { get; set; }
+        public string Status { get; set; }
+        public int UserId { get; set; } // ID пользователя, связанного с задачей
+    }
+
+    public class User
+    {
+        public string Username { get; set; }
+        public string Password { get; set; }
+        public int Id { get; set; } // ID пользователя
+    }
+
+    class Program
+    {
+        private static readonly string UsersFilePath = "users.txt";
+        private static readonly string TasksFilePath = "tasks.txt";
+        private static int _nextUserId = 1; // Счетчик для ID пользователей
+        private static int _nextTaskId = 1; // Счетчик для ID задач
+
+        static async Task Main(string[] args)
+        {
+            Console.WriteLine("Добро пожаловать в консольный менеджер задач!");
+
+            // Загружаем последние ID при запуске программы
+            await LoadLastIds();
+
+            int currentUserId = -1; // Локальная переменная для хранения ID текущего пользователя
+
+            while (true)
+            {
+                if (currentUserId == -1)
+                {
+                    Console.WriteLine("\nВыберите действие:");
+                    Console.WriteLine("1. Регистрация");
+                    Console.WriteLine("2. Вход");
+                    Console.WriteLine("3. Выход");
+
+                    string choice = Console.ReadLine();
+
+                    switch (choice)
+                    {
+                        case "1":
+                            currentUserId = await RegisterUser();
+                            break;
+                        case "2":
+                            currentUserId = await LoginUser();
+                            break;
+                        case "3":
+                            Console.WriteLine("До свидания!");
+                            return;
+                        default:
+                            Console.WriteLine("Неверный выбор. Попробуйте снова.");
+                            break;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("\nВыберите действие:");
+                    Console.WriteLine("1. Создать задачу");
+                    Console.WriteLine("2. Посмотреть задачи");
+                    Console.WriteLine("3. Редактировать задачу");
+                    Console.WriteLine("4. Удалить задачу");
+                    Console.WriteLine("5. Выйти из системы");
+
+                    string choice = Console.ReadLine();
+
+                    switch (choice)
+                    {
+                        case "1":
+                            await CreateTask(currentUserId);
+                            break;
+                        case "2":
+                            await ViewTasks(currentUserId);
+                            break;
+                        case "3":
+                            await EditTask(currentUserId);
+                            break;
+                        case "4":
+                            await DeleteTask(currentUserId);
+                            break;
+                        case "5":
+                            currentUserId = -1; // Сбрасываем ID текущего пользователя
+                            Console.WriteLine("Вы вышли из системы.");
+                            break;
+                        default:
+                            Console.WriteLine("Неверный выбор. Попробуйте снова.");
+                            break;
+                    }
+                }
+            }
+        }
+
+        static async Task LoadLastIds()
+        {
+            // Загружаем последний ID пользователя
+            List<User> users = await LoadUsers();
+            if (users.Count > 0)
+            {
+                _nextUserId = users.Max(u => u.Id) + 1;
+            }
+
+            // Загружаем последний ID задачи
+            List<TaskItem> tasks = await LoadTasks();
+            if (tasks.Count > 0)
+            {
+                _nextTaskId = tasks.Max(t => t.UserId) + 1;
+            }
+        }
+
+        static async Task<int> RegisterUser()
+        {
+            Console.WriteLine("Введите имя пользователя:");
+            string username = Console.ReadLine();
+
+            List<User> users = await LoadUsers();
+            bool userExists = false;
+
+            foreach (var user in users)
+            {
+                if (user.Username == username)
+                {
+                    userExists = true;
+                    break;
+                }
+            }
+
+            if (userExists)
+            {
+                Console.WriteLine("Пользователь с таким именем уже существует.");
+                return -1; // Возвращаем -1, если регистрация не удалась
+            }
+
+            Console.WriteLine("Введите пароль:");
+            string password = Console.ReadLine();
+
+            User newUser = new User
+            {
+                Username = username,
+                Password = password,
+                Id = _nextUserId++ // Присваиваем уникальный ID
+            };
+
+            users.Add(newUser);
+            await SaveUsers(users);
+
+            Console.WriteLine("Регистрация прошла успешно.");
+            return newUser.Id; // Возвращаем ID нового пользователя
+        }
+
+        static async Task<int> LoginUser()
+        {
+            Console.WriteLine("Введите имя пользователя:");
+            string username = Console.ReadLine();
+            Console.WriteLine("Введите пароль:");
+            string password = Console.ReadLine();
+
+            List<User> users = await LoadUsers();
+            User foundUser = null;
+
+            foreach (var user in users)
+            {
+                if (user.Username == username && user.Password == password)
+                {
+                    foundUser = user;
+                    break;
+                }
+            }
+
+            if (foundUser == null)
+            {
+                Console.WriteLine("Неверное имя пользователя или пароль.");
+                return -1; // Возвращаем -1, если вход не удался
+            }
+
+            Console.WriteLine($"Вы вошли как: {foundUser.Username}");
+            return foundUser.Id; // Возвращаем ID вошедшего пользователя
+        }
+
+        static async Task CreateTask(int userId)
+        {
+            Console.WriteLine("Введите заголовок задачи:");
+            string title = Console.ReadLine();
+
+            Console.WriteLine("Введите описание задачи:");
+            string description = Console.ReadLine();
+
+            Console.WriteLine("Выберите приоритет (низкий, средний, высокий):");
+            string priority = Console.ReadLine();
+
+            Console.WriteLine("Выберите статус (недоступна, в процессе, завершена):");
+            string status = Console.ReadLine();
+
+            TaskItem newTask = new TaskItem
+            {
+                Title = title,
+                Description = description,
+                Priority = priority,
+                Status = status,
+                UserId = userId // Используем переданный ID пользователя
+            };
+
+            List<TaskItem> tasks = await LoadTasks();
+            tasks.Add(newTask);
+            await SaveTasks(tasks);
+
+            Console.WriteLine("Задача создана успешно.");
+        }
+
+        static async Task ViewTasks(int userId)
+        {
+            List<TaskItem> tasks = await LoadTasks();
+            List<TaskItem> userTasks = tasks.Where(t => t.UserId == userId).ToList();
+
+            if (userTasks.Count == 0)
+            {
+                Console.WriteLine("Нет задач для отображения.");
+                return;
+            }
+
+            Console.WriteLine("\nСписок задач:");
+            for (int i = 0; i < userTasks.Count; i++)
+            {
+                Console.WriteLine($"{i + 1}. Название: {userTasks[i].Title}, Описание: {userTasks[i].Description}, Приоритет: {userTasks[i].Priority}, Статус: {userTasks[i].Status}");
+            }
+        }
+
+        static async Task EditTask(int userId)
+        {
+            List<TaskItem> tasks = await LoadTasks();
+            List<TaskItem> userTasks = tasks.Where(t => t.UserId == userId).ToList();
+
+            if (userTasks.Count == 0)
+            {
+                Console.WriteLine("Нет задач для редактирования.");
+                return;
+            }
+
+            Console.WriteLine("Введите номер задачи для редактирования:");
+            if (!int.TryParse(Console.ReadLine(), out int taskIndex) || taskIndex < 1 || taskIndex > userTasks.Count)
+            {
+                Console.WriteLine("Неверный номер задачи.");
+                return;
+            }
+
+            TaskItem taskToEdit = userTasks[taskIndex - 1];
+            int globalTaskIndex = tasks.IndexOf(taskToEdit);
+
+            Console.WriteLine($"Редактирование задачи: {taskToEdit.Title}");
+
+            Console.WriteLine("Введите новый заголовок задачи (или нажмите Enter, чтобы пропустить):");
+            string newTitle = Console.ReadLine();
+            if (!string.IsNullOrEmpty(newTitle))
+            {
+                taskToEdit.Title = newTitle;
+            }
+
+            Console.WriteLine("Введите новое описание задачи (или нажмите Enter, чтобы пропустить):");
+            string newDescription = Console.ReadLine();
+            if (!string.IsNullOrEmpty(newDescription))
+            {
+                taskToEdit.Description = newDescription;
+            }
+
+            Console.WriteLine("Выберите новый приоритет (низкий, средний, высокий, или нажмите Enter, чтобы пропустить):");
+            string newPriority = Console.ReadLine();
+            if (!string.IsNullOrEmpty(newPriority))
+            {
+                taskToEdit.Priority = newPriority;
+            }
+
+            Console.WriteLine("Выберите новый статус (недоступна, в процессе, завершена, или нажмите Enter, чтобы пропустить):");
+            string newStatus = Console.ReadLine();
+            if (!string.IsNullOrEmpty(newStatus))
+            {
+                taskToEdit.Status = newStatus;
+            }
+
+            tasks[globalTaskIndex] = taskToEdit;
+
+            await SaveTasks(tasks);
+            Console.WriteLine("Задача отредактирована успешно.");
+        }
+
+        static async Task DeleteTask(int userId)
+        {
+            List<TaskItem> tasks = await LoadTasks();
+            List<TaskItem> userTasks = tasks.Where(t => t.UserId == userId).ToList();
+
+            if (userTasks.Count == 0)
+            {
+                Console.WriteLine("Нет задач для удаления.");
+                return;
+            }
+
+            Console.WriteLine("Введите номер задачи для удаления:");
+            if (!int.TryParse(Console.ReadLine(), out int taskIndex) || taskIndex < 1 || taskIndex > userTasks.Count)
+            {
+                Console.WriteLine("Неверный номер задачи.");
+                return;
+            }
+
+            TaskItem taskToDelete = userTasks[taskIndex - 1];
+            tasks.Remove(taskToDelete);
+
+            await SaveTasks(tasks);
+
+            Console.WriteLine("Задача удалена успешно.");
+        }
+
+        static async Task<List<User>> LoadUsers()
+        {
+            if (!File.Exists(UsersFilePath))
+            {
+                return new List<User>();
+            }
+
+            List<User> users = new List<User>();
+
+            using (StreamReader reader = new StreamReader(UsersFilePath))
+            {
+                string line;
+                while ((line = await reader.ReadLineAsync()) != null)
+                {
+                    string[] parts = line.Split(':');
+                    if (parts.Length == 3)
+                    {
+                        users.Add(new User
+                        {
+                            Username = parts[0],
+                            Password = parts[1],
+                            Id = int.Parse(parts[2])
+                        });
+                    }
+                }
+            }
+
+            return users;
+        }
+
+        static async Task SaveUsers(List<User> users)
+        {
+            using (StreamWriter writer = new StreamWriter(UsersFilePath))
+            {
+                foreach (var user in users)
+                {
+                    await writer.WriteLineAsync($"{user.Username}:{user.Password}:{user.Id}");
+                }
+            }
+        }
+
+        static async Task<List<TaskItem>> LoadTasks()
+        {
+            if (!File.Exists(TasksFilePath))
+            {
+                return new List<TaskItem>();
+            }
+
+            List<TaskItem> tasks = new List<TaskItem>();
+
+            using (StreamReader reader = new StreamReader(TasksFilePath))
+            {
+                string line;
+                while ((line = await reader.ReadLineAsync()) != null)
+                {
+                    string[] parts = line.Split(':');
+                    if (parts.Length == 5)
+                    {
+                        tasks.Add(new TaskItem
+                        {
+                            Title = parts[0],
+                            Description = parts[1],
+                            Priority = parts[2],
+                            Status = parts[3],
+                            UserId = int.Parse(parts[4])
+                        });
+                    }
+                }
+            }
+
+            return tasks;
+        }
+
+        static async Task SaveTasks(List<TaskItem> tasks)
+        {
+            using (StreamWriter writer = new StreamWriter(TasksFilePath))
+            {
+                foreach (var task in tasks)
+                {
+                    await writer.WriteLineAsync($"{task.Title}:{task.Description}:{task.Priority}:{task.Status}:{task.UserId}");
+                }
+            }
+        }
+    }
+}
